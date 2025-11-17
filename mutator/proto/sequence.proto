@@ -1,0 +1,7 @@
+edition = "2023";
+
+import "proto/command.proto";
+
+message Sequence {
+  repeated Command command = 1;
+}

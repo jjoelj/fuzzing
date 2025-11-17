@@ -1,0 +1,13 @@
+{
+  "name": "Container",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  runArgs: ["--privileged"],
+  postCreateCommand: "postCreateCommand.sh",
+  "customizations": {
+    "jetbrains": {
+      "backend": "IntelliJ"
+    }
+  }
+}

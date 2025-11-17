@@ -1,0 +1,28 @@
+edition = "2023";
+
+message Command {
+  oneof command {
+    Add add = 1;
+    Remove remove = 2;
+    Divide divide = 3;
+    Reset reset = 4;
+    Print print = 5;
+  }
+}
+
+message Add {
+  int32 number = 2;
+}
+
+message Remove {
+  bool allOccurrences = 1;
+  repeated int32 numbers = 2;
+}
+
+message Divide {
+  double divisor = 1;
+}
+
+message Reset {}
+
+message Print {}
