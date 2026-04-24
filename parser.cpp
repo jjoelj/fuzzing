@@ -23,7 +23,7 @@ namespace parser {
                     break;
                 case Command::kRemove:
                     commandStruct.type = Remove;
-                    commandStruct.arguments = removeArgs({command.remove().alloccurrences(), std::vector<int32_t>(command.remove().numbers().begin(), command.remove().numbers().end())});
+                    commandStruct.arguments = removeArgs({command.remove().all_occurrences(), std::vector<int32_t>(command.remove().numbers().begin(), command.remove().numbers().end())});
                     break;
                 case Command::kDivide:
                     commandStruct.type = Divide;

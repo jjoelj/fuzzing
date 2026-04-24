@@ -1,3 +1,36 @@
+# IDE
 /.idea
+/.vscode
+
+# build
+build/
+*.o
+*.a
+
+# cmake artifacts that end up in-tree
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+build.ninja
+
+# fuzzing outputs
 fuzz_in/
 fuzz_out/
+bo_fuzz_out/
+bo_state/
+bo_rerun.out
+
+# experiment results and logs
+results/
+nohup.out
+nohup_new.out
+
+# sqlite amalgamation (downloaded at build time)
+sqlite/sqlite-amalgamation-*/
+sqlite/amalg.zip
+sqlite/sqlite3.c
+sqlite/sqlite3.h
+
+# python
+__pycache__/
+*.pyc

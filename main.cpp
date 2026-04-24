@@ -1,9 +1,9 @@
 #include <fstream>
-#include <vector>
-#include <unistd.h>
 #include <iostream>
-#include <numeric>
-#include <unordered_map>
+#include <unistd.h>
+#include <vector>
+
+#include <sqlite3.h>
 
 #include "parser.h"
 
@@ -11,103 +11,119 @@
 __AFL_FUZZ_INIT();
 #endif
 
-const std::unordered_map<CommandType, std::string> command_names = {
-    {InvalidCommand, "InvalidCommand"},
-    {Add, "Add"},
-    {Remove, "Remove"},
-    {Divide, "Divide"},
-    {Reset, "Reset"},
-    {Print, "Print"}
-};
+static void exec(sqlite3 *db, const char *sql) {
+    sqlite3_exec(db, sql, nullptr, nullptr, nullptr);
+}
 
-std::vector<int32_t> values;
-
-void run_command(const CommandStruct &command) {
-    removeArgs remove_args;
-    switch (command.type) {
-        case Add:
-            // Simulate addition
-            values.push_back(std::get<addArgs>(command.arguments).number);
+static void run_command(sqlite3 *db, const CommandStruct &cmd) {
+    char sql[512];
+    switch (cmd.type) {
+        case Add: {
+            int32_t n = std::get<addArgs>(cmd.arguments).number;
+            snprintf(sql, sizeof(sql), "INSERT INTO t(val) VALUES(%d)", n);
+            exec(db, sql);
             break;
-        case Remove:
-            remove_args = std::get<removeArgs>(command.arguments);
-            if (remove_args.allOccurrences) {
-                for (const auto &val: remove_args.numbers) {
-                    values.erase(std::remove(values.begin(), values.end(), val), values.end());
-                }
-            } else {
-                for (const auto &val: remove_args.numbers) {
-                    auto it = std::find(values.begin(), values.end(), val);
-                    if (it != values.end()) {
-                        values.erase(it);
-                    }
-                }
+        }
+        case Remove: {
+            const auto &args = std::get<removeArgs>(cmd.arguments);
+            for (int32_t n : args.numbers) {
+                if (args.allOccurrences)
+                    snprintf(sql, sizeof(sql), "DELETE FROM t WHERE val=%d", n);
+                else
+                    snprintf(sql, sizeof(sql),
+                             "DELETE FROM t WHERE rowid="
+                             "(SELECT rowid FROM t WHERE val=%d LIMIT 1)", n);
+                exec(db, sql);
             }
             break;
-        case Divide:
-            if (std::get<divideArgs>(command.arguments).divisor == 0) {
-                break;
-            }
-            for (auto val: values) {
-                val = static_cast<int>(1.0 * val / std::get<divideArgs>(command.arguments).divisor);
-            }
+        }
+        case Divide: {
+            double d = std::get<divideArgs>(cmd.arguments).divisor;
+            // proto guarantees d >= 0.01 (random_command loops until d > 0.01)
+            snprintf(sql, sizeof(sql),
+                     "UPDATE t SET val=CAST(val/%.10f AS INTEGER)", d);
+            exec(db, sql);
             break;
+        }
         case Reset:
-            values.clear();
+            exec(db, "DELETE FROM t");
             break;
-        case Print:
-            for (const auto &val: values) {
-                std::cout << val << " ";
-            }
-            std::cout << std::endl;
+        case Print: {
+            // Exercises SQLite's expression evaluator + aggregate path
+            sqlite3_stmt *stmt = nullptr;
+            sqlite3_prepare_v2(
+                db, "SELECT val, val*val, ABS(val) FROM t ORDER BY val", -1, &stmt, nullptr);
+            while (sqlite3_step(stmt) == SQLITE_ROW) { /* consume rows */ }
+            sqlite3_finalize(stmt);
             break;
+        }
         case InvalidCommand:
             break;
     }
 }
 
-void simulate(const unsigned char *buf, const size_t len) {
-    std::vector<CommandStruct> sequence = parser::parseCommands(buf, len);
-    for (const auto &command: sequence) {
-#ifndef FUZZING_BUILD
-        std::cout << "Simulating command: " << command_names.at(command.type) << std::endl;
-#endif
-        run_command(command);
-        if (std::accumulate(values.begin(), values.end(), 0) == 42) {
-            std::cerr << "Abort triggered: sum equals 42" << std::endl;
+// Bug 1: sum==42 with count>=3; Bug 2: ssq%1000==133 with count>=4
+static void check_crashes(sqlite3 *db) {
+    sqlite3_stmt *stmt = nullptr;
+    int rc = sqlite3_prepare_v2(
+        db,
+        "SELECT SUM(val), COUNT(*), SUM(val*val) FROM t",
+        -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) return;
+
+    if (sqlite3_step(stmt) == SQLITE_ROW &&
+        sqlite3_column_type(stmt, 0) != SQLITE_NULL) {
+        int64_t sum   = sqlite3_column_int64(stmt, 0);
+        int64_t count = sqlite3_column_int64(stmt, 1);
+        int64_t ssq   = sqlite3_column_int64(stmt, 2);
+        sqlite3_finalize(stmt);
+
+        if (sum == 42 && count >= 3) {
+            std::cerr << "Bug 1: sum==42 with count==" << count << "\n";
             abort();
         }
-        if (std::accumulate(values.begin(), values.end(), 0, [](const int acc, const int val) {
-            return acc + val % 27;
-        }) == 133) {
-            std::cerr << "Abort triggered: sum equals 133" << std::endl;
+        if (count >= 4 && (ssq % 1000) == 133) {
+            std::cerr << "Bug 2: ssq%1000==133 with count==" << count << "\n";
             abort();
         }
+    } else {
+        sqlite3_finalize(stmt);
     }
+}
+
+static void simulate(const unsigned char *buf, size_t len) {
+    auto commands = parser::parseCommands(buf, len);
+    if (commands.empty()) return;
+
+    sqlite3 *db = nullptr;
+    sqlite3_open(":memory:", &db);
+    exec(db, "CREATE TABLE t(val INTEGER)");
+    exec(db, "PRAGMA journal_mode=OFF");  // faster in-memory, more code paths
+
+    for (const auto &cmd : commands)
+        run_command(db, cmd);
+
+    check_crashes(db);
+    sqlite3_close(db);
 }
 
 int main(int argc, char *argv[]) {
 #ifndef FUZZING_BUILD
     if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <inputfile>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <inputfile>\n";
         return 1;
     }
     std::ifstream f(argv[1], std::ios::binary);
-    std::vector<unsigned char> filebuf(
-        (std::istreambuf_iterator(f)),
-        std::istreambuf_iterator<char>()
-    );
-    simulate(filebuf.data(), filebuf.size());
+    std::vector<unsigned char> buf(
+        (std::istreambuf_iterator<char>(f)), {});
+    simulate(buf.data(), buf.size());
 #else
-    ssize_t len;
-    unsigned char *buf;
-
     __AFL_INIT();
-
-    buf = __AFL_FUZZ_TESTCASE_BUF;
-    len = __AFL_FUZZ_TESTCASE_LEN;
-    simulate(buf, len);
+    unsigned char *buf = __AFL_FUZZ_TESTCASE_BUF;
+    while (__AFL_LOOP(10000)) {
+        ssize_t len = __AFL_FUZZ_TESTCASE_LEN;
+        simulate(buf, static_cast<size_t>(len < 0 ? 0 : len));
+    }
 #endif
-
     return 0;
 }

@@ -15,7 +15,7 @@ message Add {
 }
 
 message Remove {
-  bool allOccurrences = 1;
+  bool all_occurrences = 1;
   repeated int32 numbers = 2;
 }
 

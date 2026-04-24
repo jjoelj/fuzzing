@@ -6,6 +6,15 @@ find_package(absl CONFIG REQUIRED)
 find_package(Protobuf CONFIG REQUIRED)
 find_package(libprotobuf-mutator CONFIG REQUIRED)
 
+# Build SQLite amalgamation with AFL++ instrumentation (system libsqlite3 is not instrumented)
+add_library(sqlite3_afl STATIC sqlite/sqlite3.c)
+target_compile_definitions(sqlite3_afl PUBLIC
+    SQLITE_THREADSAFE=0
+    SQLITE_DEFAULT_MEMSTATUS=0
+    SQLITE_OMIT_LOAD_EXTENSION=1
+)
+target_include_directories(sqlite3_afl PUBLIC sqlite)
+
 set(PROTO_LIB_INSTALL_DIR "${CMAKE_BINARY_DIR}/proto_lib_install")
 
 ExternalProject_Add(proto_lib_ep
@@ -57,7 +66,7 @@ endif()
 
 add_executable(main main.cpp)
 if(TARGET proto_lib::proto_lib)
-    target_link_libraries(main PRIVATE proto_lib::proto_lib parser_lib)
+    target_link_libraries(main PRIVATE proto_lib::proto_lib parser_lib sqlite3_afl dl)
 endif()
 
 add_executable(fuzz_main main.cpp)
@@ -65,6 +74,8 @@ if (TARGET proto_lib::proto_lib)
     target_link_libraries(fuzz_main PRIVATE
             proto_lib::proto_lib
             parser_lib
+            sqlite3_afl
+            dl
     )
     target_compile_definitions(fuzz_main PRIVATE FUZZING_BUILD=1)
 endif()

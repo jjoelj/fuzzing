@@ -1,11 +1,20 @@
 {
-  "name": "Container",
+  "name": "AFL++ BO Fuzzing",
   "build": {
     "dockerfile": "Dockerfile"
   },
-  runArgs: ["--privileged"],
-  postCreateCommand: "postCreateCommand.sh",
+  "runArgs": ["--privileged"],
+  "remoteUser": "user",
+  "postAttachCommand": "sudo chown -R $(id -u):$(id -g) /workspaces",
+  "shutdownAction": "none",
   "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ]
+    },
     "jetbrains": {
       "backend": "IntelliJ"
     }
